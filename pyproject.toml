@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "gradio-hello-world"
+version = "0.1.0"
+description = "A simple hello world Gradio app"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+gradio = "^5.0.0"
+
+[tool.poetry.scripts]
+start = "app:demo.launch"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
