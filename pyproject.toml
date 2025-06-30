@@ -12,6 +12,7 @@ gradio = "^5.0.0"
 chromadb = "^1.0.13"
 pypdf2 = "^3.0.1"
 langchain-text-splitters = "^0.3.8"
+openai = "^1.0.0"
 
 [tool.poetry.scripts]
 start = "app:demo.launch"
