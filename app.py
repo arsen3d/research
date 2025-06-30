@@ -227,13 +227,15 @@ Format your response clearly with headers and bullet points where appropriate.
     else:
         return f"{search_results_text}\n\n🤖 **AI Analysis:** {llm_enhancement or 'Unable to generate analysis'}"
 
-def advanced_rag_search(query, num_results=5, anura_api_key=""):
-    """Advanced RAG search that uses multiple LLM calls for comprehensive analysis"""
-    if not query.strip():
-        return "Please enter a search query."
+def advanced_rag_search_chat(message, history, num_results=5, anura_api_key=""):
+    """Advanced RAG search with chat interface and history tracking"""
+    if not message.strip():
+        return history, history
     
     if not anura_api_key or not anura_api_key.strip():
-        return "Advanced RAG search requires an Anura API key. Please provide your API key."
+        error_response = "Advanced RAG search requires an Anura API key. Please provide your API key."
+        history.append([message, error_response])
+        return history, history
     
     try:
         # Initialize ChromaDB client
@@ -242,16 +244,20 @@ def advanced_rag_search(query, num_results=5, anura_api_key=""):
         try:
             collection = client.get_collection("pdf_documents")
         except:
-            return "No documents found. Please upload and process some PDF files first."
+            error_response = "No documents found. Please upload and process some PDF files first."
+            history.append([message, error_response])
+            return history, history
         
         # Query the collection for more results for better context
         results = collection.query(
-            query_texts=[query],
+            query_texts=[message],
             n_results=min(num_results * 2, 20)  # Get more results for analysis
         )
         
         if not results['documents'] or not results['documents'][0]:
-            return f"No relevant documents found for query: '{query}'"
+            error_response = f"No relevant documents found for query: '{message}'"
+            history.append([message, error_response])
+            return history, history
         
         # Combine all relevant documents for comprehensive analysis
         documents = results['documents'][0]
@@ -269,11 +275,18 @@ def advanced_rag_search(query, num_results=5, anura_api_key=""):
         
         comprehensive_context = "\n\n---\n\n".join(context_chunks)
         
-        # Enhanced RAG prompt for comprehensive analysis
+        # Build conversation context from history
+        conversation_context = ""
+        if history:
+            conversation_context = "\n\nPrevious conversation:\n"
+            for user_msg, assistant_msg in history[-3:]:  # Include last 3 exchanges for context
+                conversation_context += f"User: {user_msg}\nAssistant: {assistant_msg}\n\n"
+        
+        # Enhanced RAG prompt for comprehensive analysis with conversation context
         rag_prompt = f"""
-You are an expert research assistant analyzing documents to answer user queries. 
-
-User Query: "{query}"
+You are an expert research assistant analyzing documents to answer user queries in a conversational manner.
+{conversation_context}
+Current User Query: "{message}"
 
 Document Context:
 {comprehensive_context}
@@ -288,22 +301,32 @@ Please provide a comprehensive analysis that includes:
 
 4. **Analysis & Insights**: Provide deeper analysis, connections between different sources, and implications.
 
-5. **Gaps & Limitations**: Identify what information might be missing or what questions remain unanswered.
+5. **Context Awareness**: If this relates to previous questions in our conversation, acknowledge the connection and build upon earlier discussion.
 
-6. **Recommendations**: Suggest next steps for research or additional questions to explore.
+6. **Follow-up Questions**: Suggest relevant follow-up questions the user might want to explore.
 
-Format your response with clear headers and use bullet points where appropriate. Always cite your sources when making claims.
+Format your response conversationally but with clear structure. Always cite your sources when making claims.
 """
         
         llm_analysis = call_anura_api(rag_prompt, anura_api_key)
         
         if llm_analysis and not llm_analysis.startswith("Error"):
-            return f"🔍 **Advanced RAG Analysis for: '{query}'**\n\n{llm_analysis}\n\n---\n\n📊 **Search Statistics:**\n• Documents analyzed: {len(documents)}\n• Sources: {len(set(m.get('source_file', 'Unknown') for m in metadatas))}\n• Analysis powered by Anura API"
+            response = f"{llm_analysis}\n\n---\n\n📊 **Search Statistics:**\n• Documents analyzed: {len(documents)}\n• Sources: {len(set(m.get('source_file', 'Unknown') for m in metadatas))}\n• Analysis powered by Anura API"
         else:
-            return f"Error in advanced analysis: {llm_analysis or 'Unable to generate comprehensive analysis'}"
+            response = f"Error in advanced analysis: {llm_analysis or 'Unable to generate comprehensive analysis'}"
+        
+        # Add to history
+        history.append([message, response])
+        return history, history
     
     except Exception as e:
-        return f"Error in advanced RAG search: {str(e)}"
+        error_response = f"Error in advanced RAG search: {str(e)}"
+        history.append([message, error_response])
+        return history, history
+
+def clear_chat_history():
+    """Clear the chat history"""
+    return [], []
 
 # Create the Gradio interface
 with gr.Blocks(title="AI-Enhanced Research Assistant") as demo:
@@ -371,41 +394,71 @@ with gr.Blocks(title="AI-Enhanced Research Assistant") as demo:
             # Also trigger on Enter key press
             search_input.submit(fn=search_documents, inputs=[search_input, num_results, anura_api_key], outputs=search_output)
         
-        with gr.TabItem("Advanced RAG Search"):
+        with gr.TabItem("Advanced RAG Chat"):
+            gr.Markdown("### 🤖 AI Research Chat with Document Analysis")
+            gr.Markdown("Have a conversation with AI about your documents. Chat history is maintained for context.")
+            
             with gr.Row():
-                with gr.Column():
-                    rag_search_input = gr.Textbox(
-                        label="Search Query",
-                        placeholder="Enter your search query here...",
-                        lines=2
-                    )
+                with gr.Column(scale=1):
                     rag_num_results = gr.Slider(
                         minimum=1,
                         maximum=10,
                         value=5,
                         step=1,
-                        label="Number of Results"
+                        label="Documents per Query"
                     )
                     rag_anura_api_key = gr.Textbox(
                         label="Anura API Key",
-                        placeholder="Enter your Anura API key for advanced analysis...",
+                        placeholder="Enter your Anura API key for chat functionality...",
                         lines=1,
                         type="password"
                     )
-                    rag_search_btn = gr.Button("Perform Advanced RAG Search", variant="primary")
+                    clear_btn = gr.Button("Clear Chat History", variant="secondary")
                 
-                with gr.Column():
-                    rag_search_output = gr.Textbox(
-                        label="RAG Search Results",
-                        lines=20,
-                        interactive=False
+                with gr.Column(scale=3):
+                    chatbot = gr.Chatbot(
+                        label="AI Research Assistant Chat",
+                        height=400,
+                        show_label=True
                     )
+                    
+                    with gr.Row():
+                        msg = gr.Textbox(
+                            label="",
+                            placeholder="Ask questions about your documents...",
+                            lines=1,
+                            scale=4
+                        )
+                        submit_btn = gr.Button("Send", variant="primary", scale=1)
             
-            # Connect the advanced RAG search function
-            rag_search_btn.click(fn=advanced_rag_search, inputs=[rag_search_input, rag_num_results, rag_anura_api_key], outputs=rag_search_output)
+            # Chat state to maintain history
+            chat_history = gr.State([])
             
-            # Also trigger on Enter key press
-            rag_search_input.submit(fn=advanced_rag_search, inputs=[rag_search_input, rag_num_results, rag_anura_api_key], outputs=rag_search_output)
+            # Function to handle user input and update chat
+            def user_input(message, history):
+                if message.strip():
+                    return "", history + [[message, ""]]
+                return message, history
+            
+            def bot_response(history, num_results, api_key):
+                if history and history[-1][1] == "":  # If there's a pending user message
+                    user_message = history[-1][0]
+                    # Remove the pending message and get response
+                    history_without_pending = history[:-1]
+                    updated_history, _ = advanced_rag_search_chat(user_message, history_without_pending, num_results, api_key)
+                    return updated_history
+                return history
+            
+            # Connect the chat functionality
+            msg.submit(user_input, [msg, chatbot], [msg, chatbot]).then(
+                bot_response, [chatbot, rag_num_results, rag_anura_api_key], [chatbot]
+            )
+            
+            submit_btn.click(user_input, [msg, chatbot], [msg, chatbot]).then(
+                bot_response, [chatbot, rag_num_results, rag_anura_api_key], [chatbot]
+            )
+            
+            clear_btn.click(clear_chat_history, outputs=[chatbot, chat_history])
         
         with gr.TabItem("About & Usage"):
             gr.Markdown("""
@@ -414,29 +467,39 @@ with gr.Blocks(title="AI-Enhanced Research Assistant") as demo:
             ### 🔧 Features:
             1. **PDF Upload**: Upload multiple PDF documents for analysis
             2. **Document Search**: Basic search through your documents with optional AI enhancement
-            3. **Advanced RAG Search**: Comprehensive AI-powered research analysis (requires API key)
+            3. **Advanced RAG Chat**: Interactive AI-powered research chat with conversation history
             
             ### 🤖 Anura API Integration:
             This application integrates with the **Anura API** to provide enhanced search results using Large Language Models (LLMs).
             
             **What you get with Anura API:**
             - AI-powered document analysis and summarization
+            - Interactive chat interface with conversation memory
             - Intelligent answers to your research questions
             - Connections and insights across multiple documents
             - Comprehensive research recommendations
+            - Context-aware responses that build on previous questions
             
             **To use AI features:**
             1. Get your Anura API key from: https://anura-testnet.lilypad.tech/
-            2. Enter your API key in the search forms
-            3. Enjoy enhanced, intelligent search results!
+            2. Enter your API key in the search forms or chat interface
+            3. Enjoy enhanced, intelligent search results and conversations!
             
             ### 🔍 Search Types:
             - **Document Search**: Shows relevant document excerpts with optional AI summary
-            - **Advanced RAG Search**: Full AI analysis with comprehensive insights (requires API key)
+            - **Advanced RAG Chat**: Interactive conversational AI that remembers your questions and builds context over time
+            
+            ### 💬 Chat Features:
+            - **Conversation Memory**: The AI remembers previous questions and answers in your session
+            - **Context Building**: Each question builds on previous ones for deeper analysis
+            - **Follow-up Questions**: The AI suggests relevant follow-up questions
+            - **Clear History**: Reset the conversation anytime with the "Clear Chat History" button
             
             ### 💡 Tips:
             - Upload multiple related PDFs for better cross-document analysis
             - Use specific, clear questions for better AI responses
+            - Build on previous questions - the AI remembers your conversation
+            - Ask follow-up questions to dive deeper into topics
             - The AI can identify gaps in information and suggest further research
             - All your documents are stored locally and securely
             """)
