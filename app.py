@@ -394,7 +394,7 @@ with gr.Blocks(title="AI-Enhanced Research Assistant") as demo:
             # Also trigger on Enter key press
             search_input.submit(fn=search_documents, inputs=[search_input, num_results, anura_api_key], outputs=search_output)
         
-        with gr.TabItem("Advanced RAG Chat"):
+        with gr.TabItem("RAG Chat"):
             gr.Markdown("### 🤖 AI Research Chat with Document Analysis")
             gr.Markdown("Have a conversation with AI about your documents. Chat history is maintained for context.")
             
@@ -427,7 +427,8 @@ with gr.Blocks(title="AI-Enhanced Research Assistant") as demo:
                             label="",
                             placeholder="Ask questions about your documents...",
                             lines=1,
-                            scale=4
+                            scale=4,
+                            container=False
                         )
                         submit_btn = gr.Button("Send", variant="primary", scale=1)
             
