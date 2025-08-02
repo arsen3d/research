@@ -1,0 +1,1 @@
+docker build -t lilypad/oar-research:0.1.0 -f dockerfile .
